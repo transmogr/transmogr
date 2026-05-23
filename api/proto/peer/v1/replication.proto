@@ -1,0 +1,173 @@
+syntax = "proto3";
+
+package transmogr.peer.v1;
+
+option go_package = "github.com/transmogr/transmogr/pkg/proto/transmogr/peerv1";
+
+import "google/protobuf/timestamp.proto";
+
+// ReplicationService exposes asymmetric peer replication:
+// consumers connect to a peer and read that peer's local-region data stream.
+service ReplicationService {
+  // Consume opens a server-streaming replication feed for the serving peer region.
+  rpc Consume(ConsumeRequest) returns (stream ConsumeResponse);
+
+  // Ack confirms durable processing of all events up to the referenced event id.
+  rpc Ack(AckRequest) returns (AckResponse);
+}
+
+// ConsumeRequest identifies the consumer and advertises protocol compatibility.
+message ConsumeRequest {
+  // region is the consuming peer region identity.
+  string region = 1;
+  // version is the consuming peer version.
+  string version = 2;
+  // configuration is the consuming peer configuration fingerprint.
+  string configuration = 3;
+  // snapshot_requests carries per-table snapshot bootstrap requests.
+  repeated SnapshotRequest snapshot_requests = 4;
+}
+
+// SnapshotRequest requests snapshot bootstrap for one table, optionally resuming
+// after the last durably applied primary key checkpoint on the consumer.
+message SnapshotRequest {
+  // table is the replicated table name.
+  string table = 1;
+  // after_primary_key resumes snapshot reads strictly after this primary key.
+  repeated PrimaryKeyPart after_primary_key = 2;
+}
+
+// ConsumeResponse is one envelope emitted by the serving peer.
+message ConsumeResponse {
+  oneof msg {
+    // handshake identifies the serving peer and confirms stream compatibility.
+    Handshake handshake = 1;
+    // snapshot_chunk carries one chunk of snapshot rows.
+    SnapshotChunk snapshot_chunk = 2;
+    // snapshot_complete marks the end of snapshot bootstrap for one table.
+    SnapshotComplete snapshot_complete = 6;
+    // event_batch carries ordered incremental replication events (polling path).
+    EventBatch event_batch = 3;
+    // transaction_batch carries all events from one CDC source transaction (CDC path).
+    TransactionBatch transaction_batch = 4;
+    // heartbeat keeps the stream alive and exposes sender time.
+    Heartbeat heartbeat = 5;
+  }
+}
+
+message SnapshotComplete {
+  string table = 1;
+}
+
+// Handshake identifies the serving peer region and advertised protocol version.
+message Handshake {
+  // region is the serving peer region identity.
+  string region = 1;
+  // version is the serving peer version.
+  string version = 2;
+  // configuration is the serving peer configuration fingerprint.
+  string configuration = 3;
+}
+
+// SnapshotChunk carries a chunk of snapshot rows for one table.
+message SnapshotChunk {
+  // table is the replicated table name.
+  string table = 1;
+  // rows contains the chunk rows in transfer order.
+  repeated SnapshotRow rows = 2;
+  // last_chunk marks the final chunk for this snapshot stream.
+  bool last_chunk = 3;
+  // watermark is the sender-side catch-up boundary captured before snapshot streaming began.
+  google.protobuf.Timestamp watermark = 4;
+}
+
+// SnapshotRow is one full row image within snapshot transfer.
+message SnapshotRow {
+  // primary_key describes the row primary key in column order.
+  repeated PrimaryKeyPart primary_key = 1;
+  // payload is the encoded row payload.
+  map<string, bytes> fields = 2;
+  // metadata carries transit-only transformer state used during transport.
+  // Entries under transit.* must be consumed before local persistence.
+  map<string, bytes> metadata = 3;
+}
+
+// EventBatch is one ordered batch of incremental events for a table.
+message EventBatch {
+  // sequence is the peer-local batch sequence for this table.
+  uint64 sequence = 1;
+  // events contains the ordered incremental events in this batch.
+  repeated Event events = 2;
+}
+
+
+// TransactionBatch is one atomic CDC transaction delivered as a single batch.
+// All events must be applied within a single database transaction on the receiver.
+message TransactionBatch {
+  // sequence is the peer-local batch sequence shared across all tables.
+  uint64 sequence = 1;
+
+  // tx_id is the source transaction identifier (LSN on PostgreSQL) used to
+  // deduplicate redeliveries and correlate events to the originating transaction.
+  string tx_id = 2;
+  // events contains the ordered incremental events in this batch.
+  repeated Event events = 3;
+}
+
+// Event is one incremental row mutation.
+message Event {
+  // Operation identifies the kind of row mutation.
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_INSERT = 1;
+    OPERATION_UPDATE = 2;
+    OPERATION_DELETE = 3;
+  }
+  // event_id is the stable event identifier used for acks and tracing.
+  string event_id = 1;
+  // origin_region is the region that originally produced this event.
+  string origin_region = 2;
+  // table is the replicated table name.
+  string table = 3;
+  // primary_key describes the row primary key in column order.
+  repeated PrimaryKeyPart primary_key = 4;
+  // operation identifies whether the event is an upsert or delete.
+  Operation operation = 5;
+  // payload is the encoded row payload for upserts.
+  map<string, bytes> fields = 6;
+  // metadata carries transit-only transformer state used during transport.
+  // Entries under transit.* must be consumed before local persistence.
+  map<string, bytes> metadata = 7;
+  // version is the source ordering token.
+  int64 version = 8;
+}
+
+// PrimaryKeyPart is one component of a possibly composite primary key.
+message PrimaryKeyPart {
+  // column is the source column name.
+  string column = 1;
+  oneof value {
+    string string_value = 2;
+    int64 integer_value = 3;
+    bool boolean_value = 4;
+  }
+}
+
+// AckRequest confirms processing of all events up to the referenced last event id.
+message AckRequest {
+  // region is the consuming peer region identity.
+  string region = 1;
+  // table is the replicated table name.
+  string table = 2;
+  // last_event_id is the last event id durably processed by the receiver.
+  string last_event_id = 3;
+}
+
+// AckResponse confirms the acknowledgement was accepted.
+message AckResponse {}
+
+// Heartbeat is a keepalive and latency measurement message.
+message Heartbeat {
+  // sent_at is the sender timestamp for latency measurement.
+  google.protobuf.Timestamp sent_at = 1;
+}

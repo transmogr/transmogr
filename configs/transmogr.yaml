@@ -1,0 +1,107 @@
+region: local
+log_level: info
+log_format: text
+
+transport:
+  reconnect_delay: 5s
+  ping_interval: 15s
+  grpc:
+    listen_addr: ":8443"
+    insecure: true
+  metrics:
+    listen_addr: ":8080"
+
+crypto:
+  refresh_interval: 1m
+  retry_attempts: 3
+  retry_delay: 1s
+  source:
+    env:
+      active_key_id: emailKey
+      active_key_env: TRANSMOGR_CRYPTO_KEY # required to enable env source
+      keyring_env: TRANSMOGR_CRYPTO_KEYRING
+    http:
+      url: ""
+      timeout: 5s
+      token_env: TRANSMOGR_KEYS_TOKEN
+      header_name: Authorization
+    vault:
+      address: ""
+      token_env: VAULT_TOKEN
+      path: ""
+      timeout: 5s
+  # Example HTTP source:
+  # source:
+  #   http:
+  #     url: https://keys.internal/v1/transmogr
+  #     timeout: 5s
+  #     token_env: TRANSMOGR_KEYS_TOKEN
+  #     header_name: Authorization
+  #
+  # Example Vault source:
+  # source:
+  #   vault:
+  #     address: http://127.0.0.1:8200
+  #     token_env: VAULT_TOKEN
+  #     path: secret/data/transmogr/keys
+  #     timeout: 5s
+  #
+  # Example merged source config:
+  # source:
+  #   env:
+  #     active_key_id: emailKey
+  #     active_key_env: TRANSMOGR_CRYPTO_KEY
+  #     keyring_env: TRANSMOGR_CRYPTO_KEYRING
+  #   http:
+  #     url: https://keys.internal/v1/transmogr
+  #     timeout: 5s
+  #     token_env: TRANSMOGR_KEYS_TOKEN
+  #     header_name: Authorization
+
+replication:
+  source:
+    type: cdc
+    cdc:
+      publication: transmogr_publication
+      slot: transmogr_slot
+      status_interval: 10s
+      # update_diff: false  # send only changed fields on UPDATE; requires REPLICA IDENTITY FULL
+    polling:
+      interval: 5s
+  snapshot:
+    chunk_size: 1000
+  apply_mode: upsert
+  broadcast_mode: full_sync
+
+lease:
+  ttl: 15s
+  renew_interval: 5s
+  cleanup_interval: 5m
+
+outbox:
+  cleanup_interval: 5m
+  max_batch_age: 168h
+  max_pending_per_peer: 100000
+
+db:
+  postgres:
+    dsn: postgres://admin:admin@localhost:15432/transmogr
+    state_schema: transmogr
+
+peers:
+  - region: us-east
+    endpoint: localhost:9443
+
+tables:
+  - name: users
+    primary_key: [id]
+    region_field: region
+  - name: payments
+    primary_key: [id, region]
+
+transformers:
+  - type: crypto
+    table: users
+    crypto_type: aes-gcm
+    fields: [email]
+    key_id: emailKey

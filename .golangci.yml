@@ -1,0 +1,67 @@
+version: "2"
+
+run:
+  timeout: 5m
+  go: "1.25"
+  tests: true
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+    - gofumpt
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/transmogr/transmogr
+
+linters:
+  enable:
+    - bodyclose
+    - errcheck
+    - govet
+    - ineffassign
+    - misspell
+    - revive
+    - staticcheck
+    - gocritic
+    - nakedret
+    - gosec
+    - prealloc
+    - lll
+    - unused
+  settings:
+    gocritic:
+      disabled-checks:
+        - commentFormatting
+    nakedret:
+      max-func-lines: 20
+    lll:
+      line-length: 120
+    unused:
+      exported-fields-are-used: false
+  exclusions:
+    rules:
+      - path: internal/metrics/.*\.go
+        text: "var-naming: avoid package names that conflict with Go standard library package names"
+        linters:
+          - revive
+      - path: internal/service/crypto/.*\.go
+        text: "var-naming: avoid package names that conflict with Go standard library package names"
+        linters:
+          - revive
+      - path: pkg/crypto/.*\.go
+        text: "var-naming: avoid package names that conflict with Go standard library package names"
+        linters:
+          - revive
+      - path: internal/version/.*\.go
+        text: "var-naming: avoid package names that conflict with Go standard library package names"
+        linters:
+          - revive
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+      - path: mocks_test\.go
+        linters:
+          - lll

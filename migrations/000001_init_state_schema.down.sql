@@ -1,0 +1,1 @@
+DROP SCHEMA IF EXISTS __state_schema__ CASCADE;
